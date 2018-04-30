@@ -1,0 +1,6 @@
+TODO
+----
+
+Lots of stuff. 
+Most important, cache battle / base results so we don't have to do a lookup
+that takes 30+ seconds every time.

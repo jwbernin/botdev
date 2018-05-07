@@ -1,15 +1,12 @@
-# https://github.com/Rapptz/discord.py/blob/async/examples/reply.py
+
 from __future__ import print_function
 import discord
-from discord.ext.commands import Bot
 from discord.ext import commands
-from apiclient.discovery import build
-from httplib2 import Http
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 import pprint
 from battlemap import Battlemap
 from datetime import datetime
+import calendar
+import time
 
 battleMap = Battlemap()
 
@@ -20,18 +17,23 @@ spreadsheet_key='1i-tw8TcZNHxNHzu3r_tqe1bT7yzimXWRc_JQQJBXS5c'
 Client = discord.Client()
 bot_prefix = "?"
 
+battleCache = {}
+completedCache = {}
+lastCacheUpdate = 0
+
 client = commands.Bot(command_prefix=bot_prefix)
 
-# Setup the Sheets API
-#SCOPES = 'https://spreadsheets.google.com/feeds'
-#store = file.Storage('credentials.json')
-#creds = store.get()
-#if not creds or creds.invalid:
-#    flow = client.flow_from_clientsecrets('credentials.json', SCOPES)
-#    creds = tools.run_flow(flow, store)
-#service = build('sheets', 'v4', http=creds.authorize(Http()))
-#credentials = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', SCOPES)
-#gs = gspread.authorize(credentials)
+def updateBattleCache():
+  curTime = int(calendar.timegm(time.gmtime()))
+  if ( curTime - lastCacheUpdate) < 300:
+    return
+  (active, completed) = getAllBattles()
+  for battle in active:
+    battleCache[battle['battleUniqueID']] = battle
+  for battle in completed:
+    completedCache[battle['battleUniqueID']] = battle
+  lastCacheUpdate = curTime
+
 
 @client.event
 async def on_ready():
@@ -47,28 +49,25 @@ async def ping(ctx):
 
 @client.command(pass_context=True)
 async def getLiveBattles(ctx):
-  battles = battleMap.getBattles()
+  battles = battleCache
   await client.say("I can display information on "+str(len(battles))+" battles. Those battles include:")
-  for battle in battles:
-    await client.say("Battle ID "+battle['battleUniqueID'])
-
+  for bID in battles.keys():
+    await client.say("Battle ID "+bID)
+  updateBattleCache()
+  
 @client.command(pass_context=True)
 async def getBattleInfo(ctx):
   battleID = ctx.message.content[15:]
-  battles = battleMap.getBattles()
-  battle={}
-  for item in battles:
-    if item['battleUniqueID'] == battleID:
-      battle = item
-  if battle == {}:
+  if battleID not in battleCache.keys():
     await client.say("Couldn't get information for that battle!")
     return
-  if battle['finished'] == 1:
+  if battleID in completedCache.keys():
     await client.say("Battle completed - no information available")
     return
-  battleInfo = battleMap.getBattleDetails(battle['id'])
-  ownBasePlayer = battleMap.getOwnerDetails(battle['ownBase'])
-  oppoBasePlayer = battleMap.getOwnerDetails(battle['oppoBase'])
+  battle = battleCache[battleID] 
+  battleInfo = battle['mapInfo']
+  ownBasePlayer = battle['nlPlayer']
+  oppoBasePlayer = battle['oppoPlayer']
   now = datetime.utcnow()
   battleEnd = datetime.strptime(battleInfo['attack_on'], '%Y-%m-%d %H:%M:%S')
   timeToEnd = str(battleEnd-now)
@@ -79,7 +78,7 @@ async def getBattleInfo(ctx):
 
 @client.command(pass_context=True)
 async def getNextEndingBattle(ctx):
-  battles = battleMap.getBattles()
+  battles = battleCache
   sortOn = "resolutionTime"
   decorated = [(dict_[sortOn], dict_) for dict_ in battles]
   decorated.sort()
@@ -90,9 +89,9 @@ async def getNextEndingBattle(ctx):
       activeBattles.append(battle)
   battle = activeBattles[0]
   await client.say("The next ending battle is "+battle['battleUniqueID'])
-  battleInfo = battleMap.getBattleDetails(battle['id'])
-  ownBasePlayer = battleMap.getOwnerDetails(battle['ownBase'])
-  oppoBasePlayer = battleMap.getOwnerDetails(battle['oppoBase'])
+  battleInfo = battle['mapInfo']
+  ownBasePlayer = battle['nlPlayer']
+  oppoBasePlayer = battle['oppoPlayer']
   now = datetime.utcnow()
   battleEnd = datetime.strptime(battleInfo['attack_on'], '%Y-%m-%d %H:%M:%S')
   timeToEnd = str(battleEnd-now)
@@ -123,6 +122,8 @@ def getAllBattles():
     oppoBase = battleMap.getBaseProfile(battleInfo['oppo_base'])
     battle['nlBaseName'] = nlBase['dt']['nm']
     battle['oppoBaseName'] = oppoBase['dt']['nm']
+    battle['mapInfo'] = battleInfo
+    battle['timeToEnd'] = timeToEnd
   return [activeBattles, completedBattles]
   
 @client.command(pass_context=True)
@@ -145,16 +146,3 @@ async def debug(ctx):
 client.run(TOKEN)
 
 
-#  # Call the Sheets API
-#  SPREADSHEET_ID = '1i-tw8TcZNHxNHzu3r_tqe1bT7yzimXWRc_JQQJBXS5c'
-#  RANGE_NAME = 'Current Battles!A3:A13'
-#  result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID,
-#                                              range=RANGE_NAME).execute()
-#  values = result.get('values', [])
-#  if not values:
-#    print('No data found.')
-#  else:
-#    print('Nyoko Battle Owners:')
-#    for row in values:
-#      # Print columns A and E, which correspond to indices 0 and 4.
-#      print('%s' % (row[0]))
